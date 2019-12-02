@@ -18,12 +18,6 @@ enable-json-logging: true
 enable-encrypted-token: false
 # do not redirec the request, simple 307 it
 no-redirects: false
-# the location of a certificate you wish the proxy to use for TLS support
-tls-cert:
-# the location of a private key for TLS
-tls-private-key:
-# the public key for the ca, used for mutual TLS
-tls-ca-certificate:
 # the redirection url, essentially the site url, note: /oauth/callback is added at the end
 redirection-url: http://127.0.0.3000
 # the encryption key used to encode the session state
@@ -36,8 +30,6 @@ cookie-refresh-name:
 upstream-url: http://127.0.0.1:80
 # upstream-keepalives specified wheather you want keepalive on the upstream endpoint
 upstream-keepalives: true
-# skip the tls verification of the upstream url
-skip-upstream-tls-verify: true|false
 # additional scopes to add to add to the default (openid+email+profile)
 scopes: []
 # enables a more extra secuirty features

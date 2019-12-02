@@ -33,7 +33,7 @@ import (
 
 const durationType = "time.Duration"
 
-// newOauthProxyApp creates a new cli application and runs it
+// NewOauthProxyApp creates a new cli application and runs it
 func NewOauthProxyApp() *cli.App {
 	config := authconfig.NewDefaultConfig()
 	app := cli.NewApp()
@@ -43,7 +43,7 @@ func NewOauthProxyApp() *cli.App {
 	app.Author = common.Author
 	app.Email = common.Email
 	app.Flags = getCommandLineOptions()
-	app.UsageText = "keycloak-gatekeeper [options]"
+	app.UsageText = "keycloak-auth [options]"
 
 	// step: the standard usage message isn't that helpful
 	app.OnUsageError = func(context *cli.Context, err error, isSubcommand bool) error {
@@ -194,13 +194,6 @@ func parseCLIOptions(cx *cli.Context, config *authconfig.Config) (err error) {
 				}
 			}
 		}
-	}
-	if cx.IsSet("tag") {
-		tags, err := util.DecodeKeyPairs(cx.StringSlice("tag"))
-		if err != nil {
-			return err
-		}
-		util.MergeMaps(config.Tags, tags)
 	}
 	if cx.IsSet("match-claims") {
 		claims, err := util.DecodeKeyPairs(cx.StringSlice("match-claims"))

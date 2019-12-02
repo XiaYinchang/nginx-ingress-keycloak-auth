@@ -62,8 +62,6 @@ type Config struct {
 	OAuthURI string `json:"oauth-uri" yaml:"oauth-uri" usage:"the uri for proxy oauth endpoints" env:"OAUTH_URI"`
 	// Scopes is a list of scope we should request
 	Scopes []string `json:"scopes" yaml:"scopes" usage:"list of scopes requested when authenticating the user"`
-	// Upstream is the upstream endpoint i.e whom were proxying to
-	Upstream string `json:"upstream-url" yaml:"upstream-url" usage:"url for the upstream endpoint you wish to proxy" env:"UPSTREAM_URL"`
 	// Resources is a list of protected resources
 	Resources []*resource.Resource `json:"resources" yaml:"resources" usage:"list of resources 'uri=/admin*|methods=GET,PUT|roles=role1,role2'"`
 	// Headers permits adding customs headers across the board
@@ -200,13 +198,6 @@ type Config struct {
 	// ServerIdleTimeout is the idle timeout on the http server
 	ServerIdleTimeout time.Duration `json:"server-idle-timeout" yaml:"server-idle-timeout" usage:"the server idle timeout on the http server"`
 
-	// SignInPage is the relative url for the sign in page
-	SignInPage string `json:"sign-in-page" yaml:"sign-in-page" usage:"path to custom template displayed for signin"`
-	// ForbiddenPage is a access forbidden page
-	ForbiddenPage string `json:"forbidden-page" yaml:"forbidden-page" usage:"path to custom template used for access forbidden"`
-	// Tags is passed to the templates
-	Tags map[string]string `json:"tags" yaml:"tags" usage:"keypairs passed to the templates at render,e.g title=Page"`
-
 	// ForwardingUsername is the username to login to the oauth service
 	ForwardingUsername string `json:"forwarding-username" yaml:"forwarding-username" usage:"username to use when logging into the openid provider" env:"FORWARDING_USERNAME"`
 	// ForwardingPassword is the password to use for the above
@@ -218,7 +209,7 @@ type Config struct {
 	DisableAllLogging bool `json:"disable-all-logging" yaml:"disable-all-logging" usage:"disables all logging to stdout and stderr"`
 }
 
-// newDefaultConfig returns a initialized config
+// NewDefaultConfig returns a initialized config
 func NewDefaultConfig() *Config {
 	var hostnames []string
 	if name, err := os.Hostname(); err == nil {
@@ -252,7 +243,6 @@ func NewDefaultConfig() *Config {
 		ServerReadTimeout:             10 * time.Second,
 		ServerWriteTimeout:            10 * time.Second,
 		SkipOpenIDProviderTLSVerify:   false,
-		Tags:                          make(map[string]string),
 		UpstreamExpectContinueTimeout: 10 * time.Second,
 		UpstreamKeepaliveTimeout:      10 * time.Second,
 		UpstreamKeepalives:            true,
@@ -271,7 +261,7 @@ func (r *Config) WithOAuthURI(uri string) string {
 	return fmt.Sprintf("%s/%s", r.OAuthURI, uri)
 }
 
-// isValid validates if the config is valid
+// IsValid validates if the config is valid
 func (r *Config) IsValid() error {
 	if r.Listen == "" {
 		return errors.New("you have not specified the listening interface")
@@ -300,12 +290,6 @@ func (r *Config) IsValid() error {
 			return errors.New("no forwarding password")
 		}
 	} else {
-		if r.Upstream == "" {
-			return errors.New("you have not specified an upstream endpoint to proxy to")
-		}
-		if _, err := url.Parse(r.Upstream); err != nil {
-			return fmt.Errorf("the upstream endpoint is invalid, %s", err)
-		}
 
 		// step: if the skip verification is off, we need the below
 		if !r.SkipTokenVerification {
@@ -371,16 +355,6 @@ func (r *Config) IsValid() error {
 	}
 
 	return nil
-}
-
-// hasCustomSignInPage checks if there is a custom sign in  page
-func (r *Config) HasCustomSignInPage() bool {
-	return r.SignInPage != ""
-}
-
-// hasForbiddenPage checks if there is a custom forbidden page
-func (r *Config) HasCustomForbiddenPage() bool {
-	return r.ForbiddenPage != ""
 }
 
 // fileExists check if a file exists

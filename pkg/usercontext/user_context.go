@@ -99,7 +99,7 @@ func ExtractIdentity(token jose.JWT) (*UserContext, error) {
 	}
 
 	// @step: extract the client roles from the access token
-	if accesses, found := claims[common.ClaimRealmAccess].(map[string]interface{}); found {
+	if accesses, found := claims[common.ClaimResourceAccess].(map[string]interface{}); found {
 		for name, list := range accesses {
 			scopes := list.(map[string]interface{})
 			if roles, found := scopes[common.ClaimResourceRoles]; found {

@@ -52,7 +52,6 @@ import (
 type OauthProxy struct {
 	Client         *oidc.Client
 	config         *config.Config
-	endpoint       *url.URL
 	Idp            oidc.ProviderConfig
 	IdpClient      *http.Client
 	Listener       net.Listener
@@ -90,11 +89,6 @@ func NewProxy(config *config.Config) (*OauthProxy, error) {
 		metricsHandler: promhttp.Handler(),
 	}
 
-	// parse the upstream endpoint
-	if svc.endpoint, err = url.Parse(config.Upstream); err != nil {
-		return nil, err
-	}
-
 	// initialize the store if any
 	if config.StoreURL != "" {
 		if svc.store, err = store.CreateStorage(config.StoreURL); err != nil {
@@ -115,15 +109,8 @@ func NewProxy(config *config.Config) (*OauthProxy, error) {
 		Log.Warn("client credentials are not set, depending on provider (confidential|public) you might be unable to auth")
 	}
 
-	// are we running in forwarding mode?
-	if config.EnableForwarding {
-		if err := svc.createForwardingProxy(); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := svc.createReverseProxy(); err != nil {
-			return nil, err
-		}
+	if err := svc.createAuthProxy(); err != nil {
+		return nil, err
 	}
 
 	return svc, nil
@@ -154,12 +141,8 @@ func createLogger(config *config.Config) (*zap.Logger, error) {
 	return c.Build()
 }
 
-// createReverseProxy creates a reverse proxy
-func (r *OauthProxy) createReverseProxy() error {
-	r.Log.Info("enabled reverse proxy mode, upstream url", zap.String("url", r.config.Upstream))
-	if err := r.createUpstreamProxy(r.endpoint); err != nil {
-		return err
-	}
+// createAuthProxy creates a reverse proxy
+func (r *OauthProxy) createAuthProxy() error {
 	engine := chi.NewRouter()
 	engine.MethodNotAllowed(EmptyHandler)
 	engine.NotFound(EmptyHandler)
@@ -192,7 +175,6 @@ func (r *OauthProxy) createReverseProxy() error {
 		engine.Use(c.Handler)
 	}
 
-	engine.Use(r.proxyMiddleware)
 	r.Router = engine
 
 	if len(r.config.ResponseHeaders) > 0 {
@@ -230,11 +212,7 @@ func (r *OauthProxy) createReverseProxy() error {
 	if r.config.EnableSessionCookies {
 		r.Log.Info("using session cookies only for access and refresh tokens")
 	}
-
-	// step: load the templates if any
-	if err := r.createTemplates(); err != nil {
-		return err
-	}
+	
 	// step: provision in the protected resources
 	enableDefaultDeny := r.config.EnableDefaultDeny
 	for _, x := range r.config.Resources {
@@ -288,59 +266,16 @@ func (r *OauthProxy) createReverseProxy() error {
 	return nil
 }
 
-// createForwardingProxy creates a forwarding proxy
-func (r *OauthProxy) createForwardingProxy() error {
-	r.Log.Info("enabling forward signing mode, listening on", zap.String("interface", r.config.Listen))
-
-	if err := r.createUpstreamProxy(nil); err != nil {
-		return err
-	}
-	//nolint:bodyclose
-	forwardingHandler := r.forwardProxyHandler()
-
-	// set the http handler
-	proxy := r.Upstream.(*goproxy.ProxyHttpServer)
-	r.Router = proxy
-
-	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
-
-	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-		// @NOTES, somewhat annoying but goproxy hands back a nil response on proxy client errors
-		if resp != nil && r.config.EnableLogging {
-			start := ctx.UserData.(time.Time)
-			latency := time.Since(start)
-			common.LatencyMetric.Observe(latency.Seconds())
-			r.Log.Info("client request",
-				zap.String("method", resp.Request.Method),
-				zap.String("path", resp.Request.URL.Path),
-				zap.Int("status", resp.StatusCode),
-				zap.Int64("bytes", resp.ContentLength),
-				zap.String("host", resp.Request.Host),
-				zap.String("path", resp.Request.URL.Path),
-				zap.String("latency", latency.String()))
-		}
-
-		return resp
-	})
-	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		ctx.UserData = time.Now()
-		forwardingHandler(req, ctx.Resp)
-		return req, ctx.Resp
-	})
-
-	return nil
-}
-
 // Run starts the proxy service
 func (r *OauthProxy) Run() error {
 	listener, err := r.createHTTPListener(listenerConfig{
-		hostnames:           r.config.Hostnames,
-		listen:              r.config.Listen,
-		proxyProtocol:       r.config.EnableProxyProtocol,
-		redirectionURL:      r.config.RedirectionURL,
-		useFileTLS:          false,
-		useLetsEncryptTLS:   false,
-		useSelfSignedTLS:    false,
+		hostnames:         r.config.Hostnames,
+		listen:            r.config.Listen,
+		proxyProtocol:     r.config.EnableProxyProtocol,
+		redirectionURL:    r.config.RedirectionURL,
+		useFileTLS:        false,
+		useLetsEncryptTLS: false,
+		useSelfSignedTLS:  false,
 	})
 
 	if err != nil {
@@ -366,46 +301,22 @@ func (r *OauthProxy) Run() error {
 		}
 	}()
 
-	// step: are we running http service as well?
-	if r.config.ListenHTTP != "" {
-		r.Log.Info("keycloak proxy http service starting", zap.String("interface", r.config.ListenHTTP))
-		httpListener, err := r.createHTTPListener(listenerConfig{
-			listen:        r.config.ListenHTTP,
-			proxyProtocol: r.config.EnableProxyProtocol,
-		})
-		if err != nil {
-			return err
-		}
-		httpsvc := &http.Server{
-			Addr:         r.config.ListenHTTP,
-			Handler:      r.Router,
-			ReadTimeout:  r.config.ServerReadTimeout,
-			WriteTimeout: r.config.ServerWriteTimeout,
-			IdleTimeout:  r.config.ServerIdleTimeout,
-		}
-		go func() {
-			if err := httpsvc.Serve(httpListener); err != nil {
-				r.Log.Fatal("failed to start the http redirect service", zap.Error(err))
-			}
-		}()
-	}
-
 	return nil
 }
 
 // listenerConfig encapsulate listener options
 type listenerConfig struct {
-	ca                  string   // the path to a certificate authority
-	certificate         string   // the path to the certificate if any
-	clientCert          string   // the path to a client certificate to use for mutual tls
-	hostnames           []string // list of hostnames the service will respond to
-	listen              string   // the interface to bind the listener to
-	privateKey          string   // the path to the private key if any
-	proxyProtocol       bool     // whether to enable proxy protocol on the listen
-	redirectionURL      string   // url to redirect to
-	useFileTLS          bool     // indicates we are using certificates from files
-	useLetsEncryptTLS   bool     // indicates we are using letsencrypt
-	useSelfSignedTLS    bool     // indicates we are using the self-signed tls
+	ca                string   // the path to a certificate authority
+	certificate       string   // the path to the certificate if any
+	clientCert        string   // the path to a client certificate to use for mutual tls
+	hostnames         []string // list of hostnames the service will respond to
+	listen            string   // the interface to bind the listener to
+	privateKey        string   // the path to the private key if any
+	proxyProtocol     bool     // whether to enable proxy protocol on the listen
+	redirectionURL    string   // url to redirect to
+	useFileTLS        bool     // indicates we are using certificates from files
+	useLetsEncryptTLS bool     // indicates we are using letsencrypt
+	useSelfSignedTLS  bool     // indicates we are using the self-signed tls
 }
 
 // ErrHostNotConfigured indicates the hostname was not configured
@@ -466,7 +377,6 @@ func (r *OauthProxy) createUpstreamProxy(upstream *url.URL) error {
 	//nolint:gas
 	tlsConfig := &tls.Config{InsecureSkipVerify: true}
 
-
 	// create the forwarding proxy
 	proxy := goproxy.NewProxyHttpServer()
 
@@ -487,28 +397,6 @@ func (r *OauthProxy) createUpstreamProxy(upstream *url.URL) error {
 		TLSHandshakeTimeout:   r.config.UpstreamTLSHandshakeTimeout,
 		MaxIdleConns:          r.config.MaxIdleConns,
 		MaxIdleConnsPerHost:   r.config.MaxIdleConnsPerHost,
-	}
-
-	return nil
-}
-
-// createTemplates loads the custom template
-func (r *OauthProxy) createTemplates() error {
-	var list []string
-
-	if r.config.SignInPage != "" {
-		r.Log.Debug("loading the custom sign in page", zap.String("page", r.config.SignInPage))
-		list = append(list, r.config.SignInPage)
-	}
-
-	if r.config.ForbiddenPage != "" {
-		r.Log.Debug("loading the custom sign forbidden page", zap.String("page", r.config.ForbiddenPage))
-		list = append(list, r.config.ForbiddenPage)
-	}
-
-	if len(list) > 0 {
-		r.Log.Info("loading the custom templates", zap.String("templates", strings.Join(list, ",")))
-		r.templates = template.Must(template.ParseFiles(list...))
 	}
 
 	return nil

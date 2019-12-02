@@ -192,7 +192,7 @@ func TestLogoutHandlerGood(t *testing.T) {
 
 func TestTokenHandler(t *testing.T) {
 	uri := testfake.NewFakeKeycloakConfig().WithOAuthURI(common.TokenURL)
-	goodToken := testfake.NewTestToken("example").getToken()
+	goodToken := testfake.NewTestToken("example").GetToken()
 	requests := []testfake.FakeRequest{
 		{
 			URI:          uri,

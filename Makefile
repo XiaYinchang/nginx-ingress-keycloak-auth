@@ -1,18 +1,19 @@
-NAME=keycloak-gatekeeper
-AUTHOR=keycloak
+NAME=keycloak-auth
+AUTHOR=xyc11223344
 REGISTRY=docker.io
 GOVERSION ?= 1.10.2
 ROOT_DIR=${PWD}
 HARDWARE=$(shell uname -m)
 GIT_SHA=$(shell git --no-pager describe --always --dirty)
 BUILD_TIME=$(shell date '+%s')
-VERSION ?= $(shell awk '/release.*=/ { print $$3 }' doc.go | sed 's/"//g')
+VERSION ?= 0.1
 DEPS=$(shell go list -f '{{range .TestImports}}{{.}} {{end}}' ./...)
 PACKAGES=$(shell go list ./...)
 LFLAGS ?= -X main.gitsha=${GIT_SHA} -X main.compiled=${BUILD_TIME}
 VETARGS ?= -asmdecl -atomic -bool -buildtags -copylocks -methods -nilfunc -printf -rangeloops -shift -unsafeptr
 PLATFORMS=darwin linux windows
 ARCHITECTURES=amd64
+CMDSRC=cmd/keycloak-auth/main.go
 
 .PHONY: test authors changelog build docker static release lint cover vet glide-install
 
@@ -25,12 +26,12 @@ golang:
 build: golang
 	@echo "--> Compiling the project"
 	@mkdir -p bin
-	go build -ldflags "${LFLAGS}" -o bin/${NAME}
+	go build -ldflags "${LFLAGS}" -o bin/${NAME} ${CMDSRC}
 
 static: golang
 	@echo "--> Compiling the static binary"
 	@mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux go build -a -tags netgo -ldflags "-w ${LFLAGS}" -o bin/${NAME}
+	CGO_ENABLED=0 GOOS=linux go build -o bin/${NAME} ${CMDSRC}
 
 docker-build:
 	@echo "--> Compiling the project"
@@ -49,7 +50,7 @@ docker-test:
 
 docker-release:
 	@echo "--> Building a release image"
-	@$(MAKE) static
+	# @$(MAKE) static
 	@$(MAKE) docker
 	@docker push ${REGISTRY}/${AUTHOR}/${NAME}:${VERSION}
 

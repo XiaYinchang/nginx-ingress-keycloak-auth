@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -73,14 +72,6 @@ func (r *OauthProxy) revokeProxy(w http.ResponseWriter, req *http.Request) conte
 // accessForbidden redirects the user to the forbidden page
 func (r *OauthProxy) accessForbidden(w http.ResponseWriter, req *http.Request) context.Context {
 	w.WriteHeader(http.StatusForbidden)
-	// are we using a custom http template for 403?
-	if r.config.HasCustomForbiddenPage() {
-		name := path.Base(r.config.ForbiddenPage)
-		if err := r.Render(w, name, r.config.Tags); err != nil {
-			r.Log.Error("failed to render the template", zap.Error(err), zap.String("template", name))
-		}
-	}
-
 	return r.revokeProxy(w, req)
 }
 

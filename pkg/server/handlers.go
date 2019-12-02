@@ -27,7 +27,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -92,16 +91,6 @@ func (r *OauthProxy) oauthAuthorizationHandler(w http.ResponseWriter, req *http.
 		zap.String("access_type", accessType),
 		zap.String("auth_url", authURL),
 		zap.String("client_ip", req.RemoteAddr))
-
-	// step: if we have a custom sign in page, lets display that
-	if r.config.HasCustomSignInPage() {
-		model := make(map[string]string)
-		model["redirect"] = authURL
-		w.WriteHeader(http.StatusOK)
-		_ = r.Render(w, path.Base(r.config.SignInPage), util.MergeMaps(model, r.config.Tags))
-
-		return
-	}
 
 	r.redirectToURL(authURL, w, req, http.StatusTemporaryRedirect)
 }

@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/unrolled/secure"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"log"
 )
 
 const (
@@ -44,7 +46,21 @@ const (
 // EntrypointMiddleware is custom filtering for incoming requests
 func EntrypointMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		keep := req.URL.Path
+
+		for k, v := range req.Header {
+			log.Printf("header: %s, value: %s", k, v)
+		}
+
+		rawURL := req.Header.Get("X-Original-Url")
+		if rawURL != "" {
+			originURL, err := url.Parse(rawURL)
+			if err == nil {
+				req.URL = originURL
+				req.RequestURI = originURL.RequestURI()
+				req.Method = req.Header.Get("X-Original-Method")
+			}
+		}
+
 		purell.NormalizeURL(req.URL, normalizeFlags)
 
 		// ensure we have a slash in the url
@@ -63,11 +79,6 @@ func EntrypointMiddleware(next http.Handler) http.Handler {
 		// @metric record the time taken then response code
 		common.LatencyMetric.Observe(time.Since(start).Seconds())
 		common.StatusMetric.WithLabelValues(fmt.Sprintf("%d", resp.Status()), req.Method).Inc()
-
-		// place back the original uri for proxying request
-		req.URL.Path = keep
-		req.URL.RawPath = keep
-		req.RequestURI = keep
 	})
 }
 
@@ -407,22 +418,22 @@ func (r *OauthProxy) identityHeadersMiddleware(custom []string) func(http.Handle
 			scope := req.Context().Value(common.ContextScopeName).(*usercontext.RequestScope)
 			if scope.Identity != nil {
 				user := scope.Identity
-				req.Header.Set("X-Auth-Audience", strings.Join(user.Audiences, ","))
-				req.Header.Set("X-Auth-Email", user.Email)
-				req.Header.Set("X-Auth-ExpiresIn", user.ExpiresAt.String())
-				req.Header.Set("X-Auth-Groups", strings.Join(user.Groups, ","))
-				req.Header.Set("X-Auth-Roles", strings.Join(user.Roles, ","))
-				req.Header.Set("X-Auth-Subject", user.ID)
-				req.Header.Set("X-Auth-Userid", user.Name)
-				req.Header.Set("X-Auth-Username", user.Name)
+				w.Header().Set("X-Auth-Audience", strings.Join(user.Audiences, ","))
+				w.Header().Set("X-Auth-Email", user.Email)
+				w.Header().Set("X-Auth-ExpiresIn", user.ExpiresAt.String())
+				w.Header().Set("X-Auth-Groups", strings.Join(user.Groups, ","))
+				w.Header().Set("X-Auth-Roles", strings.Join(user.Roles, ","))
+				w.Header().Set("X-Auth-Subject", user.ID)
+				w.Header().Set("X-Auth-Userid", user.Name)
+				w.Header().Set("X-Auth-Username", user.Name)
 
 				// should we add the token header?
 				if r.config.EnableTokenHeader {
-					req.Header.Set("X-Auth-Token", user.Token.Encode())
+					w.Header().Set("X-Auth-Token", user.Token.Encode())
 				}
 				// add the authorization header if requested
 				if r.config.EnableAuthorizationHeader {
-					req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", user.Token.Encode()))
+					w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", user.Token.Encode()))
 				}
 				// are we filtering out the cookies
 				if !r.config.EnableAuthorizationCookies {
@@ -431,7 +442,7 @@ func (r *OauthProxy) identityHeadersMiddleware(custom []string) func(http.Handle
 				// inject any custom claims
 				for claim, header := range customClaims {
 					if claim, found := user.Claims[claim]; found {
-						req.Header.Set(header, fmt.Sprintf("%v", claim))
+						w.Header().Set(header, fmt.Sprintf("%v", claim))
 					}
 				}
 			}
